@@ -1,28 +1,73 @@
 ## 📋 Technical Specification: Unibet Horse Racing Bet Automation
 
 ### 🌟 Project Goal
-
 Automate the placement of horse racing bets on [unibet.fr](https://www.unibet.fr/) using Playwright. The script will:
+- Accept a race URL and a list of bets
+- Log in securely using stored credentials
+- Navigate to the specified race page
+- Place bets as instructed
+- Report success or failure for each bet
+- Eventually run autonomously on Railway using scheduled triggers
 
-* Accept a race URL and list of bets
-* Log in with secure credentials
-* Navigate to the specified race page
-* Place each bet as instructed
-* Confirm success or report any errors
+---
+
+### ✅ What Has Been Accomplished
+
+- ✅ Project structure and Poetry environment set up
+- ✅ Playwright installed with Chromium browser support
+- ✅ Secure credential loading from `.env` file
+- ✅ Script opens race page directly and accepts cookie banner
+- ✅ Script handles birthdate verification modal before login
+- ✅ Script successfully logs in using:
+  - Email/pseudo
+  - Password
+  - Birthdate (entered before enabling login)
+- ✅ Script lands on the race page in a logged-in state
+- ✅ Initial stub for bet placement system exists
+- ✅ Clear console logs at each major step for debugging
+- ✅ Project tracked with Git and hosted on GitHub
+
+---
+
+### 🔨 What’s Left To Do
+
+#### 🔹 Core Functionality
+- [ ] Implement DOM logic to:
+  - Locate horses by number or name
+  - Click bet buttons for `gagnant` / `place`
+  - Enter stake amount
+  - Submit the bet and verify confirmation
+- [ ] Handle race-specific edge cases (e.g., horse not found, odds unavailable)
+
+#### 🔹 Input/Output Enhancements
+- [ ] Accept structured input from external JSON or CSV files
+- [ ] Save bet results (success/failure, error messages) to local log or file
+
+#### 🔹 Resilience and UX
+- [ ] Add retry mechanism for login or DOM lookup failures
+- [ ] Add screenshots on error or timeout
+- [ ] Improve selector robustness for future DOM changes
+
+#### 🔹 Deployment
+- [ ] Dockerize the Playwright script for Railway deployment
+- [ ] Add Railway triggers or API endpoints for bet placement
+- [ ] Persist logs or status updates (e.g., to SQLite or cloud)
+
+#### 🔹 Security
+- [ ] Use encrypted secret management in Railway for credentials
 
 ---
 
 ### 📊 Tech Stack
 
-| Component           | Choice                   |
-| ------------------- | ------------------------ |
-| Scripting Lang      | Python 3.11+             |
-| Automation Tool     | Playwright               |
-| OS / Shell          | Windows 11 w/ PowerShell |
-| Package Manager     | Poetry                   |
-| Deployment (future) | Railway                  |
-| Secrets Handling    | .env via python-dotenv   |
-| Output Format       | Console logs (for now)   |
+| Component          | Tool / Framework             |
+|--------------------|-------------------------------|
+| Language           | Python 3.11+                  |
+| Automation         | Playwright                    |
+| Packaging          | Poetry                        |
+| Runtime            | Windows 11 + PowerShell       |
+| Deployment Target  | Railway                       |
+| Secrets Handling   | `.env` via `python-dotenv`    |
 
 ---
 
@@ -33,38 +78,29 @@ unibet-bet-placer/
 ├── app/
 │   ├── __init__.py
 │   ├── main.py              # Entrypoint for the script
-│   ├── browser.py           # Sets up Playwright context and login
-│   ├── bet_placer.py        # Core logic for interpreting and placing bets
-│   └── models.py            # Bet dataclass / schema definitions
-├── tests/                   # Optional unit/integration tests
+│   ├── browser.py           # Handles login, cookies, birthdate modal
+│   ├── bet_placer.py        # Logic for placing bets
+│   └── models.py            # Schema for bet data
+├── tests/                   # Optional unit tests
 ├── .env                     # Stores UNIBET_USERNAME and UNIBET_PASSWORD
 ├── .gitignore
 ├── README.md
 ├── pyproject.toml
-└── requirements.txt         # If not using poetry
+└── requirements.txt         # If needed outside Poetry
 ```
 
 ---
 
-### 📌 .env Format
+### 📄 Input Format (Current)
 
-```
-UNIBET_USERNAME=your_email_here
-UNIBET_PASSWORD=your_password_here
-```
-
----
-
-### 📄 Input Format (Initial Version)
-
-Use a Python list of dictionaries. Later versions may support JSON or CSV.
+In-memory Python structure:
 
 ```python
 bets = [
     {
         "horse_number": 5,
         "horse_name": "Flash Lightning",
-        "bet_type": "gagnant",  # or "place"
+        "bet_type": "gagnant",
         "amount": 2.0
     },
     {
@@ -76,67 +112,67 @@ bets = [
 ]
 ```
 
+Future plan: support loading `.json` or `.csv`.
+
 ---
 
-### ⟳ Script Flow
+### 🧭 Script Flow
 
 1. **Startup**
-
-   * Load `.env` for credentials
-   * Accept command-line args or hardcoded `url` + `bets` for now
+   - Load `.env` for credentials
+   - Accept a race URL and structured bets
 
 2. **Login**
+   - Navigate to race URL
+   - Accept cookie banner
+   - Fill login modal (email, password, birthdate)
+   - Click Connexion
+   - Confirm logged-in state
 
-   * Launch browser (visible)
-   * Go to login page
-   * Fill in credentials
-   * Check for success (e.g., profile avatar or account name)
+3. **Place Bets (Planned)**
+   - For each bet:
+     - Locate correct horse
+     - Click corresponding `gagnant` or `place` option
+     - Input amount
+     - Submit
+     - Verify success
 
-3. **Navigate to Race Page**
-
-   * Go to provided `race_url`
-
-4. **Place Bets**
-
-   * For each bet:
-
-     * Locate horse by number or name
-     * Select bet type (`gagnant`, `place`)
-     * Enter amount
-     * Confirm bet
-     * Check for errors or rejection
-
-5. **Report**
-
-   * Print success/failure of each bet
-   * Log rejected bets and possible causes (e.g., market closed)
+4. **Reporting**
+   - Print and optionally persist bet results
+   - Log any failures (horse not found, button disabled, etc.)
 
 ---
 
-### 🧑‍🧬 Future Features (Planned for Later)
+### 🛡️ Error Handling Plan
 
-* Retry login or re-authentication if session expires
-* Support JSON or CSV input formats
-* Add complex bets: couplé, trio, etc.
-* Error logging with email or webhook notification
-* Headless mode toggle via CLI flag
-* Deployment via Railway with a scheduler
-
----
-
-### 🛡️ Error Handling
-
-| Scenario                  | Response                          |
-| ------------------------- | --------------------------------- |
-| Login failure             | Retry or abort with message       |
-| Horse not found           | Warn and skip                     |
-| Bet rejected (odds/limit) | Log full context and skip         |
-| Site structure changes    | Raise fatal error with screenshot |
+| Scenario                         | Planned Response                   |
+|----------------------------------|------------------------------------|
+| Login fails                      | Log error, abort or retry          |
+| Horse not found                  | Skip and warn                      |
+| DOM structure changes            | Save screenshot, raise exception   |
+| Bet rejected                     | Capture and log error state        |
+| Connection or timeout            | Retry or fail gracefully           |
 
 ---
 
-### ✅ Local Dev Tips
+### 💡 Developer Notes
 
-* Run with: `poetry run python app/main.py`
-* Use Playwright’s dev tools: `page.pause()` for debugging
-* Use `playwright codegen` to prototype interactions quickly
+- Use `page.pause()` during dev for visual inspection
+- Use `poetry run playwright codegen` to explore selectors
+- Run locally with:
+  ```bash
+  $env:PYTHONPATH = "."
+  poetry run python app/main.py
+  ```
+
+---
+
+### 📈 Roadmap to Railway Deployment
+
+| Milestone                  | Status     |
+|---------------------------|------------|
+| Local script working      | ✅ Done     |
+| Bets placed via script    | ⏳ In progress |
+| Dockerize for Railway     | ⏳ Pending  |
+| Secure secrets on Railway | ⏳ Pending  |
+| Scheduled or API-based    | ⏳ Pending  |
