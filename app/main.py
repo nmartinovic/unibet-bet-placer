@@ -1,7 +1,8 @@
 from dotenv import load_dotenv
 import os
 from app.browser import launch_browser
-from app.bet_placer import place_bets
+from app.bet_placer import place_bet
+
 
 # Load environment variables
 load_dotenv()
@@ -14,16 +15,16 @@ RACE_URL = "https://www.unibet.fr/turf/race/14-05-2025-R8-C8-valparaiso-prix-gol
 
 bets = [
     {
-        "horse_number": 5,
+        "horse_number": 9,
         "horse_name": "Flash Lightning",
         "bet_type": "gagnant",
         "amount": 2.0
     },
     {
-        "horse_number": 3,
+        "horse_number": 9,
         "horse_name": "Midnight Star",
         "bet_type": "place",
-        "amount": 1.5
+        "amount": 1.0
     }
 ]
 
@@ -37,7 +38,17 @@ async def main():
     )
 
     # You’re already on the race page after login now
-    await place_bets(page, bets)
+    await page.get_by_text("Simple", exact=True).first.click()
+    await page.wait_for_timeout(500)
+
+    for bet in bets:
+        await place_bet(
+            page,
+            horse_number=bet["horse_number"],
+            bet_type=bet["bet_type"],
+            amount=bet["amount"]
+        )
+        await page.wait_for_timeout(3000)
 
     await browser.close()
 
