@@ -1,20 +1,31 @@
 from playwright.async_api import Page
 
-async def place_bet(page: Page, horse_number: int, bet_type: str, amount: float):
-    print(f"Placing {bet_type} bet on horse #{horse_number} for €{amount}")
-    # Step 1: Click the “Simple” icon
+async def place_bet(page: Page, horse_number: int, bet_type: str, amount: float, mode: str = "simple"):
+    print(f"Placing {bet_type} bet on horse #{horse_number} for €{amount} in mode {mode}")
+
+    # Step 1: Select correct bet mode
+    mode_label = {
+        "simple": "Simple",
+        "le_deuzio": "Le Deuzio",
+        "le_boulet": "Le Boulet"
+    }.get(mode.lower())
+
+    if not mode_label:
+        raise ValueError(f"Unsupported bet mode: {mode}")
+
     try:
-        print("✔ Clicked 'Simple' bet mode")
+        await page.get_by_text(mode_label, exact=True).first.click()
+        print(f"✔ Clicked '{mode_label}' mode")
+        await page.wait_for_timeout(500)
     except Exception:
-        print("❌ Failed to click 'Simple' mode – trying fallback")
-        await page.get_by_text("Simple").nth(0).click()
-        await page.wait_for_timeout(500)  # small delay to allow Gagnant/Place icons to show
+        print(f"❌ Failed to click '{mode_label}' mode")
+        return
 
-# Step 2: Find the correct runner box by horse number
-    runner_boxes = page.locator(".runner")  # adjust selector if needed
+    # Step 2: Locate the runner box
+    runner_boxes = page.locator(".runner")
     count = await runner_boxes.count()
-
     matched_runner = None
+
     for i in range(count):
         box = runner_boxes.nth(i)
         num_el = box.locator(".number")
@@ -23,9 +34,10 @@ async def place_bet(page: Page, horse_number: int, bet_type: str, amount: float)
             break
 
     if matched_runner is None:
-        raise ValueError(f"Horse number {horse_number} not found on page")
+        print(f"❌ Horse #{horse_number} not found.")
+        return
 
-    # Step 3: Click Gagnant or Place icon inside that runner box
+    # Step 3: Click the icon
     if bet_type.lower() == "gagnant":
         icon = matched_runner.locator("i[data-turf-bettype-id='1']")
     elif bet_type.lower() == "place":
@@ -33,17 +45,18 @@ async def place_bet(page: Page, horse_number: int, bet_type: str, amount: float)
     else:
         raise ValueError("Unsupported bet type. Use 'gagnant' or 'place'.")
 
+    await icon.scroll_into_view_if_needed()
+    await icon.wait_for(state="visible")
     await icon.click()
 
-    # Step 4: Enter the stake amount
+    # Step 4: Enter the amount
     stake_input = page.locator("input[name='stake']")
     await stake_input.wait_for()
     await stake_input.fill(str(amount))
 
-    # Step 5: Click “Parier”
+    # Step 5: Parier and Confirmer
     await page.locator("span", has_text="Parier").click()
-    await page.wait_for_timeout(500)  # short wait for UI to show confirmation modal
-
-    # Step 6: Click “Confirmer”
+    await page.wait_for_timeout(500)
     await page.locator("span", has_text="Confirmer").click()
+
     print(f"✅ Bet placed on horse #{horse_number}")
