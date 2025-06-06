@@ -1,10 +1,14 @@
 import os
 import traceback
+import asyncio
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel, HttpUrl
 from typing import List, Optional
-from playwright.async_api import async_playwright
+from app.browser import launch_browser
 from app.bet_placer import place_bet
+from dotenv import load_dotenv
+
+load_dotenv()
 
 UNIBET_USERNAME = os.getenv("UNIBET_USERNAME")
 UNIBET_PASSWORD = os.getenv("UNIBET_PASSWORD")
@@ -44,52 +48,48 @@ async def place_bets(request: Request, payload: BetPayload):
     print(f"📍 Navigating to: {payload.race_url}")
 
     try:
-        async with async_playwright() as p:
-            print("🎬 Launching Playwright browser...")
-            browser = await p.chromium.launch(headless=False, slow_mo=100)
-            context = await browser.new_context()
-            page = await context.new_page()
+        browser, context, page = await launch_browser(
+            headless=True,
+            login=True,
+            username=UNIBET_USERNAME,
+            password=UNIBET_PASSWORD,
+            race_url=str(payload.race_url)
+        )
 
-            print("🔐 Logging into Unibet...")
-            await page.goto("https://www.unibet.fr/")
-            await page.get_by_text("Connexion").click()
-            await page.locator("#username").fill(UNIBET_USERNAME)
-            await page.locator("#password").fill(UNIBET_PASSWORD)
-            await page.locator("button[type='submit']").click()
-            await page.wait_for_timeout(3000)
+        current_mode = None
 
-            print("🏇 Going to race page...")
-            await page.goto(payload.race_url)
-            await page.wait_for_timeout(3000)
+        for rec in payload.recommendations:
+            bet_mode = {
+                "win": "simple",
+                "place": "simple",
+                "deuzio": "le_deuzio",
+                "boulet": "le_boulet"
+            }.get(rec.bet_type.lower(), "simple")
 
-            for rec in payload.recommendations:
-                bet_mode = {
-                    "win": "simple",
-                    "place": "simple",
-                    "deuzio": "le_deuzio",
-                    "boulet": "le_boulet"
-                }.get(rec.bet_type, "simple")
+            actual_bet_type = "gagnant" if rec.bet_type == "win" else "place"
 
-                actual_bet_type = "gagnant" if rec.bet_type == "win" else "place"
+            print(f"📝 Attempting: #{rec.horse_number}, {actual_bet_type}, €{rec.bet_amount}, mode={bet_mode}")
 
-                print(f"📝 Bet: horse #{rec.horse_number}, type: {actual_bet_type}, amount: {rec.bet_amount}, mode: {bet_mode}")
-                try:
-                    await place_bet(
-                        page=page,
-                        horse_number=rec.horse_number,
-                        bet_type=actual_bet_type,
-                        amount=rec.bet_amount,
-                        mode=bet_mode
-                    )
-                except Exception as bet_err:
-                    print(f"❌ Bet failed for horse #{rec.horse_number}: {bet_err}")
+            try:
+                await place_bet(
+                    page=page,
+                    horse_number=rec.horse_number,
+                    bet_type=actual_bet_type,
+                    amount=rec.bet_amount,
+                    mode=bet_mode,
+                    current_mode=current_mode
+                )
+                current_mode = bet_mode
+                await asyncio.sleep(3)  # ← Insert pause between bets
+            except Exception as e:
+                print(f"❌ Failed to place bet on horse #{rec.horse_number}: {e}")
 
-            print("✅ Done — closing browser.")
-            await browser.close()
+        print("✅ Done placing all bets. Closing browser.")
+        await browser.close()
 
     except Exception as e:
         tb = traceback.format_exc()
-        print("❌ Fatal error:")
+        print("❌ Fatal error during bet placement:")
         print(tb)
         raise HTTPException(status_code=500, detail=str(e))
 

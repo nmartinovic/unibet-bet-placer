@@ -3,6 +3,7 @@ Directory structure:
     ├── README.md
     ├── pyproject.toml
     ├── techspec.md
+    ├── test_browser_launch.py
     └── app/
         ├── __init__.py
         ├── api.py
@@ -30,12 +31,13 @@ authors = ["Nick Martinovic <n.martinovic@criteo.com>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.12"
+python = ">=3.11,<3.13"
 playwright = "^1.52.0"
 python-dotenv = "^1.1.0"
 fastapi = "^0.115.12"
 pydantic = "^2.11.4"
 uvicorn = "^0.34.2"
+requests = "^2.32.3"
 
 
 [build-system]
@@ -177,6 +179,39 @@ Ready for Railway deployment, logging, or trigger enhancements when you are.
 
 
 ================================================
+File: test_browser_launch.py
+================================================
+import requests
+
+payload = {
+    "race_url": "https://www.unibet.fr/turf/race/17-05-2025-R2-C2-wolvega-prix-local-hero.html",
+    "recommendations": [
+        {
+            "horse_number": 2,
+            "horse_name": "GOLDEN DE PAME",
+            "bet_type": "win",
+            "bet_amount": 2,
+            "race_id": "race_data"
+        }
+    ],
+    "summary": {
+        "total_bets": 1,
+        "total_bet_amount": 2.0,
+        "win_bets": 1,
+        "place_bets": 0,
+        "deuzio_bets": 0,
+        "boulot_bets": 0,
+        "timestamp": "2025-05-16T22:27:14.795620"
+    }
+}
+
+response = requests.post("http://127.0.0.1:5173/place-bets", json=payload)
+print(f"Status: {response.status_code}")
+print(f"Response: {response.text}")
+
+
+
+================================================
 File: app/__init__.py
 ================================================
 
@@ -185,22 +220,26 @@ File: app/__init__.py
 ================================================
 File: app/api.py
 ================================================
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+import os
+import traceback
+from fastapi import APIRouter, Request, HTTPException
+from pydantic import BaseModel, HttpUrl
 from typing import List, Optional
-import asyncio
-from app.browser import launch_browser
+from playwright.async_api import async_playwright
 from app.bet_placer import place_bet
-from dotenv import load_dotenv
-load_dotenv()
 
+UNIBET_USERNAME = os.getenv("UNIBET_USERNAME")
+UNIBET_PASSWORD = os.getenv("UNIBET_PASSWORD")
 
-app = FastAPI()
+if not UNIBET_USERNAME or not UNIBET_PASSWORD:
+    raise RuntimeError("❌ UNIBET_USERNAME or UNIBET_PASSWORD is not set in the .env file")
+
+router = APIRouter()
 
 class Recommendation(BaseModel):
     horse_number: int
     horse_name: str
-    bet_type: str  # 'win', 'place', 'deuzio', 'boulet'
+    bet_type: str  # "win", "place", "deuzio", "boulet"
     bet_amount: float
     race_id: str
 
@@ -210,34 +249,73 @@ class Summary(BaseModel):
     win_bets: int
     place_bets: int
     deuzio_bets: int
-    boulot_bets: Optional[int] = 0 # ← Add this line
     timestamp: str
+    boulot_bets: Optional[int] = 0
 
-class BetRequest(BaseModel):
-    race_url: str
+class BetPayload(BaseModel):
+    race_url: HttpUrl
     recommendations: List[Recommendation]
     summary: Summary
 
-@app.post("/place-bets")
-async def place_bets(request: BetRequest):
+@router.post("/place-bets")
+async def place_bets(request: Request, payload: BetPayload):
+    if not payload.recommendations:
+        return {"detail": "No recommendations to place."}
+
+    print(f"📬 Received betting payload with {len(payload.recommendations)} recommendations")
+    print(f"📍 Navigating to: {payload.race_url}")
+
     try:
-        browser, context, page = await launch_browser(headless=False, login=True)
-        await page.goto(request.race_url, timeout=60000)
+        async with async_playwright() as p:
+            print("🎬 Launching Playwright browser...")
+            browser = await p.chromium.launch(headless=False, slow_mo=100)
+            context = await browser.new_context()
+            page = await context.new_page()
 
-        for rec in request.recommendations:
-            await place_bet(
-                page=page,
-                horse_number=rec.horse_number,
-                bet_type=rec.bet_type,
-                amount=rec.bet_amount
-            )
+            print("🔐 Logging into Unibet...")
+            await page.goto("https://www.unibet.fr/")
+            await page.get_by_text("Connexion").click()
+            await page.locator("#username").fill(UNIBET_USERNAME)
+            await page.locator("#password").fill(UNIBET_PASSWORD)
+            await page.locator("button[type='submit']").click()
+            await page.wait_for_timeout(3000)
 
-        await browser.close()
-        return {"status": "success", "message": f"{len(request.recommendations)} bets placed"}
+            print("🏇 Going to race page...")
+            await page.goto(payload.race_url)
+            await page.wait_for_timeout(3000)
+
+            for rec in payload.recommendations:
+                bet_mode = {
+                    "win": "simple",
+                    "place": "simple",
+                    "deuzio": "le_deuzio",
+                    "boulet": "le_boulet"
+                }.get(rec.bet_type, "simple")
+
+                actual_bet_type = "gagnant" if rec.bet_type == "win" else "place"
+
+                print(f"📝 Bet: horse #{rec.horse_number}, type: {actual_bet_type}, amount: {rec.bet_amount}, mode: {bet_mode}")
+                try:
+                    await place_bet(
+                        page=page,
+                        horse_number=rec.horse_number,
+                        bet_type=actual_bet_type,
+                        amount=rec.bet_amount,
+                        mode=bet_mode
+                    )
+                except Exception as bet_err:
+                    print(f"❌ Bet failed for horse #{rec.horse_number}: {bet_err}")
+
+            print("✅ Done — closing browser.")
+            await browser.close()
 
     except Exception as e:
+        tb = traceback.format_exc()
+        print("❌ Fatal error:")
+        print(tb)
         raise HTTPException(status_code=500, detail=str(e))
 
+    return {"detail": f"{len(payload.recommendations)} bets attempted."}
 
 
 
@@ -408,64 +486,39 @@ async def launch_browser(headless=True, login=True, username=None, password=None
 ================================================
 File: app/main.py
 ================================================
-from dotenv import load_dotenv
+import sys
+import asyncio
 import os
-from app.browser import launch_browser
-from app.bet_placer import place_bet
 from fastapi import FastAPI
+from dotenv import load_dotenv
 
-# Load environment variables
+from app.api import router as api_router
+
+# Set Windows-specific event loop policy
+if sys.platform.startswith("win"):
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+
+# Load environment variables from .env
 load_dotenv()
 
 UNIBET_USERNAME = os.getenv("UNIBET_USERNAME")
 UNIBET_PASSWORD = os.getenv("UNIBET_PASSWORD")
 
-# Example race URL and bets
-RACE_URL = "https://www.unibet.fr/turf/race/14-05-2025-R8-C8-valparaiso-prix-golden-victory.html"
+if not UNIBET_USERNAME or not UNIBET_PASSWORD:
+    print("❌ UNIBET_USERNAME or UNIBET_PASSWORD is not set in your .env file")
+else:
+    print(f"✅ UNIBET_USERNAME: {UNIBET_USERNAME}")
+    print(f"✅ UNIBET_PASSWORD: {UNIBET_PASSWORD}")
 
-bets = [
-    {
-        "horse_number": 9,
-        "horse_name": "Flash Lightning",
-        "bet_type": "gagnant",
-        "mode": "simple",
-        "amount": 2.0
-    },
-    {
-        "horse_number": 9,
-        "horse_name": "Midnight Star",
-        "bet_type": "place",
-        "mode": "le_deuzio",
-        "amount": 1.0
-    }
-]
-
-async def main():
-    browser, context, page = await launch_browser(
-        headless=False,
-        login=True,
-        username=UNIBET_USERNAME,
-        password=UNIBET_PASSWORD,
-        race_url=RACE_URL
-    )
-
-    for bet in bets:
-        await place_bet(
-            page,
-            horse_number=bet["horse_number"],
-            bet_type=bet["bet_type"],
-            amount=bet["amount"],
-            mode=bet.get("mode", "simple")
-        )
-        await page.wait_for_timeout(3000)
-
-    await browser.close()
-
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
-
+# Initialize FastAPI app
 app = FastAPI()
+
+# Mount API routes
+app.include_router(api_router, prefix="")
+
+@app.on_event("startup")
+async def startup_event():
+    print("🚀 Server started and ready to receive requests.")
 
 
 
