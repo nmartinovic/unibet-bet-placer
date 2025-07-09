@@ -1,15 +1,9 @@
 from playwright.async_api import async_playwright
-from pathlib import Path
-from dotenv import load_dotenv
-load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
-import os
 import re
-print("✅ UNIBET_USERNAME:", os.getenv("UNIBET_USERNAME"))
-print("✅ UNIBET_PASSWORD:", os.getenv("UNIBET_PASSWORD"))
 
 
-async def launch_browser(headless=True, login=True, username=None, password=None, race_url=None):
-    if not username or password:
+async def launch_browser(headless=False, login=True, username=None, password=None, race_url=None):
+    if not username or not password:
         raise ValueError("Username or password not set. Check your .env file.")
 
     playwright = await async_playwright().start()

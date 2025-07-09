@@ -8,10 +8,17 @@ from app.browser import launch_browser, get_account_balance, calculate_bet_amoun
 from app.bet_placer import place_bet
 from dotenv import load_dotenv
 
+# Load environment variables at module level - try multiple approaches
 load_dotenv()
+load_dotenv(dotenv_path=".env")
+load_dotenv(dotenv_path="../.env")
 
 UNIBET_USERNAME = os.getenv("UNIBET_USERNAME")
 UNIBET_PASSWORD = os.getenv("UNIBET_PASSWORD")
+
+print(f"🔍 DEBUG - api.py loaded credentials:")
+print(f"   UNIBET_USERNAME: {UNIBET_USERNAME}")
+print(f"   UNIBET_PASSWORD: {'***' if UNIBET_PASSWORD else 'NOT SET'}")
 
 if not UNIBET_USERNAME or not UNIBET_PASSWORD:
     raise RuntimeError("❌ UNIBET_USERNAME or UNIBET_PASSWORD is not set in the .env file")
@@ -19,11 +26,24 @@ if not UNIBET_USERNAME or not UNIBET_PASSWORD:
 router = APIRouter()
 
 class Recommendation(BaseModel):
-    horse_number: int
+    horse_number: Optional[int] = None      # Will extract from race data if missing
     horse_name: str
     bet_type: str  # "win", "place", "deuzio", "boulet"
-    bet_percentage: float  # Decimal format (0.05 for 5%)
-    race_id: Optional[str] = None  # Make optional
+    bet_percentage: Optional[float] = None   # Primary field
+    bet_amount: Optional[float] = None       # Alternative field name
+    race_id: Optional[str] = None
+    
+    # Optional fields that can be ignored
+    confidence: Optional[float] = None
+    edge: Optional[float] = None
+    estimated_place_odds: Optional[float] = None
+    kelly_fraction: Optional[float] = None
+    strategy: Optional[str] = None
+    win_odds: Optional[float] = None
+    
+    def get_bet_percentage(self) -> float:
+        """Get bet percentage from either field name"""
+        return self.bet_percentage or self.bet_amount or 0.0
 
 class Summary(BaseModel):
     boulot_bets: Optional[int] = 0
@@ -66,8 +86,23 @@ async def place_bets(request: Request, payload: BetPayload):
         total_bet_amount = 0.0
 
         for rec in payload.recommendations:
+            # Get bet percentage from either field
+            bet_percentage = rec.get_bet_percentage()
+            
+            # Check if horse_number is missing
+            if not rec.horse_number:
+                print(f"❌ Missing horse_number for {rec.horse_name} - skipping bet")
+                placed_bets.append({
+                    "horse_name": rec.horse_name,
+                    "bet_type": rec.bet_type,
+                    "bet_percentage": bet_percentage,
+                    "status": "error",
+                    "error": "Missing horse_number"
+                })
+                continue
+            
             # Calculate actual bet amount from percentage
-            bet_amount = calculate_bet_amount(account_balance, rec.bet_percentage)
+            bet_amount = calculate_bet_amount(account_balance, bet_percentage)
             total_bet_amount += bet_amount
 
             bet_mode = {
